@@ -5,7 +5,8 @@ import ChatPanel from "./components/ChatPanel";
 import TaskItem from "./components/TaskItem";
 import TaskForm from "./components/TaskForm";
 import AuthScreen from "./components/AuthScreen";
-import { Sparkles, Terminal, Shield, RefreshCw, Layers, Plus, Search, Filter, Trash, Play, RefreshCcw, LogOut } from "lucide-react";
+import { Sparkles, Terminal, Shield, RefreshCw, Layers, Plus, Search, Filter, Trash, Play, RefreshCcw, LogOut, Upload, FileSpreadsheet, ChevronDown, ChevronUp, Info } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -77,6 +78,162 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [priorityFilter, setPriorityFilter] = useState<string>("ALL");
+
+  // CSV Bulk Import states
+  const [isCsvImportOpen, setIsCsvImportOpen] = useState(false);
+  const [csvMode, setCsvMode] = useState<"upload" | "paste">("upload");
+  const [isDragging, setIsDragging] = useState(false);
+  const [csvPasteText, setCsvPasteText] = useState("");
+  const [csvMessage, setCsvMessage] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
+
+  // CSV File reader triggering
+  const handleCsvFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      processCsvContent(text);
+    };
+    reader.onerror = () => {
+      setCsvMessage({ text: "Failed to read CSV. Access denied or corrupted file.", type: "error" });
+    };
+    reader.readAsText(file);
+  };
+
+  // Safe client-side CSV processor parser supporting cell quote wrapping
+  const processCsvContent = (rawText: string) => {
+    if (!rawText.trim()) {
+      setCsvMessage({ text: "CSV payload content is fully empty.", type: "error" });
+      return;
+    }
+
+    try {
+      const lines = rawText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      if (lines.length < 2) {
+        setCsvMessage({ text: "Spreadsheet must contain a header row and at least one task row.", type: "error" });
+        return;
+      }
+
+      const parseCsvLine = (line: string) => {
+        const result: string[] = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"' || char === "'") {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            result.push(current.trim());
+            current = "";
+          } else {
+            current += char;
+          }
+        }
+        result.push(current.trim());
+        return result;
+      };
+
+      const headers = parseCsvLine(lines[0]).map(h => h.trim().toLowerCase());
+      
+      const titleIndex = headers.findIndex(h => h === "title" || h === "task" || h === "name" || h === "workitem");
+      const descIndex = headers.findIndex(h => h === "description" || h === "desc" || h === "details" || h === "summary");
+      const priorityIndex = headers.findIndex(h => h === "priority" || h === "lvl" || h === "rank");
+      const statusIndex = headers.findIndex(h => h === "status" || h === "state" || h === "progress");
+      const categoryIndex = headers.findIndex(h => h === "category" || h === "tag" || h === "type" || h === "project");
+      const dueDateIndex = headers.findIndex(h => h === "duedate" || h === "due" || h === "date");
+
+      const parsedTasks: Task[] = [];
+      let skippedCount = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = parseCsvLine(lines[i]);
+        if (values.length === 0 || (values.length === 1 && !values[0])) continue;
+
+        let title = "";
+        if (titleIndex !== -1 && values[titleIndex]) {
+          title = values[titleIndex];
+        } else if (values[0]) {
+          title = values[0];
+        } else {
+          skippedCount++;
+          continue;
+        }
+
+        title = title.replace(/^["']|["']$/g, "").trim();
+        if (!title) {
+          skippedCount++;
+          continue;
+        }
+
+        let description = "Imported bulk task item.";
+        if (descIndex !== -1 && values[descIndex]) {
+          description = values[descIndex].replace(/^["']|["']$/g, "").trim();
+        }
+
+        let priorityStr = "Medium";
+        if (priorityIndex !== -1 && values[priorityIndex]) {
+          priorityStr = values[priorityIndex].replace(/^["']|["']$/g, "").trim();
+        }
+        
+        let priority: TaskPriority = TaskPriority.MEDIUM;
+        const lowP = priorityStr.toLowerCase();
+        if (lowP === "high" || lowP === "h") priority = TaskPriority.HIGH;
+        if (lowP === "low" || lowP === "l") priority = TaskPriority.LOW;
+
+        let statusStr = "New";
+        if (statusIndex !== -1 && values[statusIndex]) {
+          statusStr = values[statusIndex].replace(/^["']|["']$/g, "").trim();
+        }
+        
+        let status: TaskStatus = TaskStatus.NEW;
+        const lowS = statusStr.toLowerCase().replace(/\s+/g, "");
+        if (lowS === "inprogress" || lowS === "progress" || lowS === "active") status = TaskStatus.IN_PROGRESS;
+        if (lowS === "codecompleted") status = TaskStatus.CODE_COMPLETED;
+        if (lowS === "waitingforqa" || lowS === "qa") status = TaskStatus.WAITING_FOR_QA;
+        if (lowS === "ready") status = TaskStatus.READY;
+        if (lowS === "done" || lowS === "completed" || lowS === "finish") status = TaskStatus.DONE;
+
+        let category = "CSV Import";
+        if (categoryIndex !== -1 && values[categoryIndex]) {
+          category = values[categoryIndex].replace(/^["']|["']$/g, "").trim();
+        }
+
+        let dueDate = undefined;
+        if (dueDateIndex !== -1 && values[dueDateIndex]) {
+          const rawDue = values[dueDateIndex].replace(/^["']|["']$/g, "").trim();
+          dueDate = rawDue || undefined;
+        }
+
+        parsedTasks.push({
+          id: "task-csv-" + Date.now() + "-" + i,
+          title,
+          description,
+          status,
+          priority,
+          category,
+          dueDate,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      if (parsedTasks.length === 0) {
+        setCsvMessage({ text: "Parsed records are empty or columns are unsupported.", type: "error" });
+        return;
+      }
+
+      setTasks((prev) => [...parsedTasks, ...prev]);
+      addLog(`[CSV IMPORT] Successfully ingested ${parsedTasks.length} tasks from spreadsheet stream. Skipped: ${skippedCount}.`);
+      setCsvMessage({ 
+        text: `Successfully imported ${parsedTasks.length} tasks!`, 
+        type: "success" 
+      });
+      setCsvPasteText("");
+    } catch (err: any) {
+      setCsvMessage({ text: `Failed parsing CSV matrix schema: ${err.message || err}`, type: "error" });
+    }
+  };
 
   // Form Modal state
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -639,6 +796,147 @@ export default function App() {
                     <option value={TaskPriority.HIGH} className="bg-[#090B0E]">High</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Collapsible Bulk CSV Uploader Accordion */}
+              <div className="border border-[#2D3139]/80 rounded-lg overflow-hidden bg-[#090B0E]/50">
+                <button
+                  type="button"
+                  id="toggle-csv-import-btn"
+                  onClick={() => setIsCsvImportOpen(!isCsvImportOpen)}
+                  className="w-full px-2.5 py-1.5 flex items-center justify-between text-[10px] font-mono font-semibold text-[#8B949E] hover:text-white transition-colors cursor-pointer select-none bg-[#161B22]/30"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-[#3B82F6]" />
+                    <span>BULK CSV DATABASE IMPORT</span>
+                  </div>
+                  {isCsvImportOpen ? (
+                    <ChevronUp className="w-3 h-3 text-[#8B949E]" />
+                  ) : (
+                    <ChevronDown className="w-3 h-3 text-[#8B949E]" />
+                  )}
+                </button>
+
+                {isCsvImportOpen && (
+                  <div className="p-3 border-t border-[#2D3139]/60 space-y-3 text-left">
+                    <div>
+                      <p className="text-[10px] text-[#8B949E] leading-normal font-sans">
+                        Import tasks from spreadsheets. Ensure columns include <b className="text-white">Title</b>. Optional columns: <b className="text-[#8B949E]/90">Description, Priority, Status, Category, DueDate</b>.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-1.5 border-b border-[#2D3139]/30 pb-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setCsvMode("upload")}
+                        className={`text-[9px] font-mono px-2 py-0.5 rounded-md cursor-pointer transition-all ${
+                          csvMode === "upload"
+                            ? "bg-blue-600/10 text-blue-400 border border-blue-500/30"
+                            : "text-[#8B949E] hover:text-white"
+                        }`}
+                      >
+                        File Drag & Drop
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCsvMode("paste")}
+                        className={`text-[9px] font-mono px-2 py-0.5 rounded-md cursor-pointer transition-all ${
+                          csvMode === "paste"
+                            ? "bg-blue-600/10 text-blue-400 border border-blue-500/30"
+                            : "text-[#8B949E] hover:text-white"
+                        }`}
+                      >
+                        Copy-Paste Raw CSV
+                      </button>
+                    </div>
+
+                    {csvMode === "upload" ? (
+                      <div 
+                        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                        onDragLeave={() => setIsDragging(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setIsDragging(false);
+                          const file = e.dataTransfer.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              const text = event.target?.result as string;
+                              processCsvContent(text);
+                            };
+                            reader.readAsText(file);
+                          }
+                        }}
+                        className={`border border-dashed p-3 rounded-lg text-center transition-all relative cursor-pointer ${
+                          isDragging 
+                            ? "border-blue-500 bg-blue-600/5 text-white" 
+                            : "border-[#2D3139] hover:border-[#8B949E]/50 text-[#8B949E]"
+                        }`}
+                      >
+                        <input
+                          type="file"
+                          id="csv-file-selector"
+                          accept=".csv"
+                          onChange={handleCsvFileUpload}
+                          className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-20"
+                        />
+                        <Upload className="w-5 h-5 mx-auto text-[#8B949E]/60 mb-1" />
+                        <p className="text-[10px] font-mono font-bold uppercase text-[#E0E0E0]">
+                          Drag & Drop CSV File
+                        </p>
+                        <p className="text-[9px] text-[#8B949E] mt-0.5">
+                          Or click here to browse system files (.csv)
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <textarea
+                          placeholder="Title,Description,Priority,Status,Category&#10;Write user guides,Explain persistent SSO models,High,In progress,Security&#10;Audit telemetry,Check SQLite docker outputs,Low,New,Database"
+                          value={csvPasteText}
+                          onChange={(e) => setCsvPasteText(e.target.value)}
+                          className="w-full h-20 bg-[#090B0E] border border-[#2D3139] rounded-lg p-2 font-mono text-[9px] text-emerald-400 focus:border-[#3B82F6] outline-none placeholder-[#8B949E]/30 leading-normal"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => processCsvContent(csvPasteText)}
+                          className="w-full py-1 bg-[#21262D] hover:bg-[#30363D] border border-[#2D3139] text-[#E0E0E0] hover:text-white text-[9px] font-mono font-bold uppercase rounded-md tracking-wider transition-colors cursor-pointer"
+                        >
+                          Process Copied Matrix
+                        </button>
+                      </div>
+                    )}
+
+                    <AnimatePresence>
+                      {csvMessage && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className={`p-2 rounded-lg text-[9px] flex gap-1.5 items-start ${
+                            csvMessage.type === "success"
+                              ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
+                              : csvMessage.type === "error"
+                              ? "bg-rose-500/10 border border-rose-500/20 text-rose-400"
+                              : "bg-blue-500/10 border border-blue-500/20 text-blue-400"
+                          }`}
+                        >
+                          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <span>{csvMessage.text}</span>
+                            {csvMessage.type === "success" && (
+                              <button 
+                                onClick={() => setCsvMessage(null)} 
+                                className="ml-2 font-mono font-black hover:underline"
+                              >
+                                [Dismiss]
+                              </button>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
               </div>
             </div>
 
