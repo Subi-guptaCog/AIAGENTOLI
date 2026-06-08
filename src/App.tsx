@@ -104,7 +104,7 @@ export default function App() {
   };
 
   // Safe client-side CSV processor parser supporting cell quote wrapping
-  const processCsvContent = (rawText: string) => {
+  const processCsvContent = (rawText: string, fileName?: string) => {
     if (!rawText.trim()) {
       setCsvMessage({ text: "CSV payload content is fully empty.", type: "error" });
       return;
@@ -231,6 +231,26 @@ export default function App() {
         type: "success" 
       });
       setCsvPasteText("");
+
+      // Direct file server-side replication
+      const safeName = fileName || "tasks.csv";
+      fetch("/api/upload-csv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvContent: rawText, fileName: safeName })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          addLog(`[SERVER SYNC] CSV file replication succeeded: ${data.message}`);
+        } else {
+          addLog(`[SERVER SYNC] Warning during file upload: ${data.error}`);
+        }
+      })
+      .catch(err => {
+        addLog(`[SERVER SYNC] Server-side folder write fallback error: ${err.message || err}`);
+      });
+
     } catch (err: any) {
       setCsvMessage({ text: `Failed parsing CSV matrix schema: ${err.message || err}`, type: "error" });
     }
