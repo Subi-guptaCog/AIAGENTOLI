@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from "react";
 import { ChatMessage, Task, ChatAction } from "../types";
-import { Send, Bot, User, Sparkles, AlertCircle, RefreshCw, Calendar, CheckSquare, Plus, Trash2 } from "lucide-react";
+import { Send, Bot, User, Sparkles, AlertCircle, RefreshCw, Calendar, CheckSquare, Plus, Trash2, Upload } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
   isPending: boolean;
+  onUploadCsvFile: (text: string) => void;
 }
 
 const suggestions = [
@@ -16,7 +17,7 @@ const suggestions = [
   { text: "📅 Organize my tasks based on upcoming due dates", label: "Sort Schedule" },
 ];
 
-export default function ChatPanel({ messages, onSendMessage, isPending }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSendMessage, isPending, onUploadCsvFile }: ChatPanelProps) {
   const [inputText, setInputText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -218,6 +219,31 @@ export default function ChatPanel({ messages, onSendMessage, isPending }: ChatPa
 
       {/* Message Chat input */}
       <form onSubmit={handleSubmit} className="p-3 border-t border-[#2D3139] bg-[#161B22] flex items-center gap-2">
+        <label 
+          id="chat-csv-upload-label"
+          className={`p-2 bg-[#21262D] hover:bg-[#30363D] border border-[#2D3139] text-[#E0E0E0] hover:text-[#4ADE80] rounded-lg transition-all flex items-center justify-center cursor-pointer shrink-0 shadow-xs h-[38px] w-[38px] ${isPending ? "opacity-40 pointer-events-none" : ""}`}
+          title="Upload & Sync CSV Spreadsheet Tasks"
+        >
+          <Upload className="w-4 h-4 text-emerald-400" />
+          <input
+            type="file"
+            accept=".csv"
+            disabled={isPending}
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (event) => {
+                const text = event.target?.result as string;
+                onUploadCsvFile(text);
+              };
+              reader.readAsText(file);
+              e.target.value = ""; // reset
+            }}
+          />
+        </label>
+
         <input
           id="chat-message-input"
           type="text"
@@ -231,7 +257,7 @@ export default function ChatPanel({ messages, onSendMessage, isPending }: ChatPa
           id="chat-send-btn"
           type="submit"
           disabled={!inputText.trim() || isPending}
-          className="p-2.5 bg-[#3B82F6] text-white hover:bg-blue-600 disabled:opacity-40 disabled:hover:bg-[#3B82F6] rounded-lg transition-all flex items-center justify-center cursor-pointer shrink-0 shadow-xs"
+          className="p-2.5 bg-[#3B82F6] text-white hover:bg-blue-600 disabled:opacity-40 disabled:hover:bg-[#3B82F6] rounded-lg transition-all flex items-center justify-center cursor-pointer shrink-0 shadow-xs h-[38px] w-[38px]"
         >
           <Send className="w-4 h-4" />
         </button>
