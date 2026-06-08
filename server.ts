@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import fs from "fs";
 
 dotenv.config();
 
@@ -43,6 +44,46 @@ app.get(["/api/health", "/health"], (req, res) => {
     hasApiKey: !!getEffectiveApiKey(),
     time: new Date().toISOString()
   });
+});
+
+// Endpoint to upload CSV file: checks if folder exists, if not creates it, and saves the file
+app.post("/api/upload-csv", (req, res) => {
+  try {
+    const { csvContent, fileName } = req.body;
+    if (!csvContent || typeof csvContent !== "string") {
+      res.status(400).json({ error: "No CSV content provided." });
+      return;
+    }
+
+    // Name of target folder for CSV uploads
+    const targetFolder = "DesktopTasksWorkspace";
+    const dirPath = path.join(process.cwd(), targetFolder);
+
+    // If the directory does not exist, create it
+    if (!fs.existsSync(dirPath)) {
+      console.log(`[CSV WORKSPACE] Directory does not exist. Creating folder: ${dirPath}`);
+      fs.mkdirSync(dirPath, { recursive: true });
+    } else {
+      console.log(`[CSV WORKSPACE] Directory exists at: ${dirPath}`);
+    }
+
+    const safeFileName = fileName || "tasks.csv";
+    const filePath = path.join(dirPath, safeFileName);
+
+    // Save the file physically
+    fs.writeFileSync(filePath, csvContent, "utf8");
+    console.log(`[CSV WORKSPACE] File successfully uploaded and saved: ${filePath}`);
+
+    res.json({
+      success: true,
+      message: `Successfully saved inside server folder '${targetFolder}' as '${safeFileName}'.`,
+      folderPath: dirPath,
+      filePath: filePath,
+    });
+  } catch (error: any) {
+    console.error("[CSV WORKSPACE] Upload error:", error);
+    res.status(500).json({ error: error?.message || "Internal server error" });
+  }
 });
 
 // Local rule-based task actions parsing engine for offline fallback
