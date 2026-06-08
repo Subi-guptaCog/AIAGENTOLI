@@ -7,7 +7,7 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
   isPending: boolean;
-  onUploadCsvFile: (text: string) => void;
+  onUploadCsvFile: (text: string, fileName?: string) => void;
 }
 
 const suggestions = [
@@ -236,7 +236,7 @@ export default function ChatPanel({ messages, onSendMessage, isPending, onUpload
               const reader = new FileReader();
               reader.onload = (event) => {
                 const text = event.target?.result as string;
-                onUploadCsvFile(text);
+                onUploadCsvFile(text, file.name);
               };
               reader.readAsText(file);
               e.target.value = ""; // reset
